@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Audio Call</title>
+  </head>
+  <body>
+    <h2 id="status">Connecting...</h2>
+    <button id="callBtn" style="display: none">Call</button>
+    <button id="hangupBtn" style="display: none">Hang Up</button>
+
+    <audio id="remoteAudio" autoplay></audio>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      const status = document.getElementById("status");
+      const callBtn = document.getElementById("callBtn");
+      const hangupBtn = document.getElementById("hangupBtn");
+      const remoteAudio = document.getElementById("remoteAudio");
+
+      let peer = null;
+      let localStream = null;
+      let targetId = null;
+
+      const iceConfig = {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          {
+            urls: "turn:openrelay.metered.ca:80",
+            username: "openrelayproject",
+            credential: "openrelayproject",
+          },
+        ],
+      };
+
+      // --- Get microphone ---
+      async function getMic() {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+      }
+
+      // --- Create peer connection ---
+      function createPeer() {
+        peer = new RTCPeerConnection(iceConfig);
+
+        // Send ICE candidates to the other peer
+        peer.onicecandidate = (e) => {
+          if (e.candidate) {
+            socket.emit("ice-candidate", {
+              target: targetId,
+              candidate: e.candidate,
+            });
+          }
+        };
+
+        // Play incoming audio
+        peer.ontrack = (e) => {
+          remoteAudio.srcObject = e.streams[0];
+        };
+
+        // Add your microphone to the connection
+        localStream
+          .getTracks()
+          .forEach((track) => peer.addTrack(track, localStream));
+      }
+
+      // --- Server says: wait for someone ---
+      socket.on("wait", () => {
+        status.textContent = "Waiting for someone to call...";
+      });
+
+      // --- Server says: you are second, you call ---
+      socket.on("start-call", async ({ target }) => {
+        targetId = target;
+        status.textContent = "Someone is waiting!";
+        callBtn.style.display = "inline";
+
+        callBtn.onclick = async () => {
+          callBtn.style.display = "none";
+          hangupBtn.style.display = "inline";
+          status.textContent = "Calling...";
+
+          await getMic();
+          createPeer();
+
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+
+          // Limit audio bitrate to 20kbps
+          const sdp = offer.sdp.replace(
+            /a=mid:audio\r\n/g,
+            "a=mid:audio\r\nb=AS:20\r\n",
+          );
+          offer.sdp = sdp;
+
+          socket.emit("offer", { target: targetId, offer });
+        };
+      });
+
+      // --- Server says: someone is calling you ---
+      socket.on("incoming-call", async ({ from }) => {
+        targetId = from;
+        status.textContent = "Incoming call...";
+        hangupBtn.style.display = "inline";
+
+        await getMic();
+        createPeer();
+      });
+
+      // --- Receive offer, send answer ---
+      socket.on("offer", async ({ from, offer }) => {
+        targetId = from;
+        await peer.setRemoteDescription(offer);
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit("answer", { target: targetId, answer });
+        status.textContent = "In call";
+      });
+
+      // --- Receive answer ---
+      socket.on("answer", async ({ answer }) => {
+        await peer.setRemoteDescription(answer);
+        status.textContent = "In call";
+      });
+
+      // --- Receive ICE candidate ---
+      socket.on("ice-candidate", async ({ candidate }) => {
+        if (peer) await peer.addIceCandidate(candidate);
+      });
+
+      // --- Hang up ---
+      hangupBtn.onclick = () => {
+        peer.close();
+        peer = null;
+        localStream.getTracks().forEach((t) => t.stop());
+        status.textContent = "Call ended.";
+        hangupBtn.style.display = "none";
+      };
+    </script>
+  </body>
+</html>
