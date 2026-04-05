@@ -49,20 +49,27 @@
         ],
       };
 
-      // --- Get microphone ---
-      async function getMic() {
-        localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-        });
+      function log(msg) {
+        status.textContent = msg;
+        console.log(msg);
       }
 
-      // --- Create peer connection ---
+      async function getMic() {
+        log("Requesting mic...");
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: false,
+        });
+        log("Mic granted ✅");
+      }
+
       function createPeer() {
+        log("Creating peer connection...");
         peer = new RTCPeerConnection(iceConfig);
 
-        // Send ICE candidates to the other peer
         peer.onicecandidate = (e) => {
           if (e.candidate) {
+            log("Sending ICE candidate...");
             socket.emit("ice-candidate", {
               target: targetId,
               candidate: e.candidate,
@@ -70,93 +77,100 @@
           }
         };
 
-        // Play incoming audio
+        peer.oniceconnectionstatechange = () => {
+          log("ICE state: " + peer.iceConnectionState);
+        };
+
         peer.ontrack = (e) => {
+          log("Remote audio received ✅");
           remoteAudio.srcObject = e.streams[0];
         };
 
-        // Add your microphone to the connection
-        localStream
-          .getTracks()
-          .forEach((track) => peer.addTrack(track, localStream));
+        localStream.getTracks().forEach((track) => {
+          peer.addTrack(track, localStream);
+          log("Local track added: " + track.kind);
+        });
       }
 
-      // --- Server says: wait for someone ---
-      socket.on("wait", () => {
-        status.textContent = "Waiting for someone to call...";
-      });
+      socket.on("wait", () => log("Waiting for someone..."));
 
-      // --- Server says: you are second, you call ---
       socket.on("start-call", async ({ target }) => {
         targetId = target;
-        status.textContent = "Someone is waiting!";
+        log("Someone is waiting — press Call");
         callBtn.style.display = "inline";
 
         callBtn.onclick = async () => {
           callBtn.style.display = "none";
           hangupBtn.style.display = "inline";
-          status.textContent = "Calling...";
 
-          await getMic();
-          createPeer();
+          try {
+            await getMic();
+            createPeer();
 
-          const offer = await peer.createOffer();
-          await peer.setLocalDescription(offer);
-
-          // Limit audio bitrate to 20kbps
-          const sdp = offer.sdp.replace(
-            /a=mid:audio\r\n/g,
-            "a=mid:audio\r\nb=AS:20\r\n",
-          );
-          offer.sdp = sdp;
-
-          socket.emit("offer", { target: targetId, offer });
+            log("Creating offer...");
+            const offer = await peer.createOffer();
+            await peer.setLocalDescription(offer);
+            socket.emit("offer", { target: targetId, offer });
+            log("Offer sent ✅");
+          } catch (err) {
+            log("ERROR: " + err.message);
+          }
         };
       });
 
-      // --- Server says: someone is calling you ---
       socket.on("incoming-call", async ({ from }) => {
         targetId = from;
-        status.textContent = "Incoming call...";
+        log("Incoming call — setting up...");
         hangupBtn.style.display = "inline";
 
         try {
           await getMic();
           createPeer();
-          status.textContent = "Ready - waiting for offer...";
         } catch (err) {
-          status.textContent = "Mic error: " + err.message;
-          console.error(err);
+          log("ERROR: " + err.message);
         }
       });
 
-      // --- Receive offer, send answer ---
       socket.on("offer", async ({ from, offer }) => {
         targetId = from;
-        await peer.setRemoteDescription(offer);
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
-        socket.emit("answer", { target: targetId, answer });
-        status.textContent = "In call";
+        log("Offer received — sending answer...");
+        try {
+          await peer.setRemoteDescription(offer);
+          const answer = await peer.createAnswer();
+          await peer.setLocalDescription(answer);
+          socket.emit("answer", { target: targetId, answer });
+          log("Answer sent ✅");
+        } catch (err) {
+          log("ERROR: " + err.message);
+        }
       });
 
-      // --- Receive answer ---
       socket.on("answer", async ({ answer }) => {
-        await peer.setRemoteDescription(answer);
-        status.textContent = "In call";
+        log("Answer received...");
+        try {
+          await peer.setRemoteDescription(answer);
+          log("Connection established ✅");
+        } catch (err) {
+          log("ERROR: " + err.message);
+        }
       });
 
-      // --- Receive ICE candidate ---
       socket.on("ice-candidate", async ({ candidate }) => {
-        if (peer) await peer.addIceCandidate(candidate);
+        try {
+          if (peer) {
+            await peer.addIceCandidate(candidate);
+            log("ICE candidate added ✅");
+          }
+        } catch (err) {
+          log("ICE ERROR: " + err.message);
+        }
       });
 
-      // --- Hang up ---
       hangupBtn.onclick = () => {
         peer.close();
         peer = null;
         localStream.getTracks().forEach((t) => t.stop());
-        status.textContent = "Call ended.";
+        log("Call ended.");
         hangupBtn.style.display = "none";
       };
     </script>
