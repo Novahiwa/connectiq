@@ -7,7 +7,7 @@
 </head>
 <body>
   <h1>ConnectIQ</h1>
-  <button id="refreshBtn" onclick="location.reload()">Refresh</button><br><br>
+  <button onclick="location.reload()">Refresh</button><br><br>
 
   <div id="joinSection">
     <input id="codeInput" type="text" placeholder="Enter room code" />
@@ -29,7 +29,6 @@
     const socket = io();
     const statusEl = document.getElementById("status");
     const callBtn = document.getElementById("callBtn");
-    const refreshBtn = document.getElementById("refreshBtn");
     const hangupBtn = document.getElementById("hangupBtn");
     const joinBtn = document.getElementById("joinBtn");
     const codeInput = document.getElementById("codeInput");
@@ -125,7 +124,6 @@
 
       callBtn.onclick = async () => {
         callBtn.style.display = "none";
-        refreshBtn.style.display = "none";
         try {
           await getMic();
           createPeer();
