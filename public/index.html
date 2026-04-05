@@ -7,7 +7,7 @@
 </head>
 <body>
   <h1>ConnectIQ</h1>
-  <button onclick="location.reload()">Refresh</button><br><br>
+  <button onclick="location.reload()">Refresh</button>
 
   <div id="joinSection">
     <input id="codeInput" type="text" placeholder="Enter room code" />
@@ -116,6 +116,10 @@
     joinBtn.onclick = () => {
       const code = codeInput.value.trim();
       if (!code) return alert("Enter a room code first");
+
+      // Unlock audio on user gesture
+      ringtone.play().then(() => ringtone.pause()).catch(() => {});
+
       joinSection.style.display = "none";
       callSection.style.display = "block";
       socket.emit("join-room", code);
@@ -152,7 +156,7 @@
     socket.on("incoming-call", async ({ from }) => {
       targetId = from;
       log("Incoming call...");
-      ringtone.play();
+      ringtone.play().catch(() => {});
       try {
         await getMic();
         createPeer();
