@@ -15,8 +15,8 @@
 
   <div id="callSection" style="display:none">
     <p id="status">Connecting...</p>
+    <p id="timer" style="display:none">Duration: <span id="duration">00:00</span></p>
     <button id="callBtn" style="display:none">Call</button>
-    <button id="muteBtn" style="display:none">Mute</button>
     <button id="hangupBtn" style="display:none">Hang Up</button>
   </div>
 
@@ -29,7 +29,6 @@
     const statusEl = document.getElementById("status");
     const callBtn = document.getElementById("callBtn");
     const hangupBtn = document.getElementById("hangupBtn");
-    const muteBtn = document.getElementById("muteBtn");
     const joinBtn = document.getElementById("joinBtn");
     const codeInput = document.getElementById("codeInput");
     const joinSection = document.getElementById("joinSection");
@@ -39,7 +38,27 @@
     let peer = null;
     let localStream = null;
     let targetId = null;
-    let muted = false;
+    let timerInterval = null;
+    let seconds = 0;
+
+    function startTimer() {
+      seconds = 0;
+      document.getElementById("timer").style.display = "block";
+      timerInterval = setInterval(() => {
+        seconds++;
+        const m = String(Math.floor(seconds / 60)).padStart(2, "0");
+        const s = String(seconds % 60).padStart(2, "0");
+        document.getElementById("duration").textContent = m + ":" + s;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      seconds = 0;
+      document.getElementById("timer").style.display = "none";
+      document.getElementById("duration").textContent = "00:00";
+    }
 
     const iceConfig = {
       iceServers: [
@@ -71,12 +90,12 @@
         const state = peer.iceConnectionState;
         if (state === "connected" || state === "completed") {
           log("In call");
-          muteBtn.style.display = "inline";
           hangupBtn.style.display = "inline";
+          startTimer();
         } else if (state === "disconnected" || state === "failed") {
           log("Call ended");
-          muteBtn.style.display = "none";
           hangupBtn.style.display = "none";
+          stopTimer();
         }
       };
 
@@ -162,19 +181,13 @@
       }
     });
 
-    muteBtn.onclick = () => {
-      muted = !muted;
-      localStream.getAudioTracks().forEach(t => t.enabled = !muted);
-      muteBtn.textContent = muted ? "Unmute" : "Mute";
-    };
-
     hangupBtn.onclick = () => {
       peer.close();
       peer = null;
       localStream.getTracks().forEach(t => t.stop());
       log("Call ended.");
-      muteBtn.style.display = "none";
       hangupBtn.style.display = "none";
+      stopTimer();
     };
   </script>
 </body>
