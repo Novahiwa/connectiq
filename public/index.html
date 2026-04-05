@@ -119,7 +119,7 @@
 
     socket.on("start-call", async ({ target }) => {
       targetId = target;
-      log("Contact joined — press Call");
+      log("Contact joined -> press Call");
       callBtn.style.display = "inline";
 
       callBtn.onclick = async () => {
