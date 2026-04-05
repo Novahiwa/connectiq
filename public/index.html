@@ -1,383 +1,181 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ConnectIQ</title>
-    <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=DM+Mono:wght@300;400&display=swap" rel="stylesheet" />
-    <style>
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ConnectIQ</title>
+</head>
+<body>
+  <h1>ConnectIQ</h1>
 
-      :root {
-        --bg: #0a0a0a;
-        --surface: #111111;
-        --border: #1e1e1e;
-        --accent: #00e5a0;
-        --accent-dim: rgba(0, 229, 160, 0.12);
-        --red: #ff4d6d;
-        --red-dim: rgba(255, 77, 109, 0.12);
-        --text: #f0f0f0;
-        --muted: #555;
-      }
+  <div id="joinSection">
+    <input id="codeInput" type="text" placeholder="Enter room code" />
+    <button id="joinBtn">Join</button>
+  </div>
 
-      html, body {
-        height: 100%;
-        background: var(--bg);
-        color: var(--text);
-        font-family: 'DM Mono', monospace;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-      }
+  <div id="callSection" style="display:none">
+    <p id="status">Connecting...</p>
+    <button id="callBtn" style="display:none">Call</button>
+    <button id="muteBtn" style="display:none">Mute</button>
+    <button id="hangupBtn" style="display:none">Hang Up</button>
+  </div>
 
-      /* Subtle grid background */
-      body::before {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background-image:
-          linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
-        background-size: 40px 40px;
-        pointer-events: none;
-        z-index: 0;
-      }
+  <audio id="remoteAudio" autoplay></audio>
+  <p><small>Made with ❤️ by Mzika</small></p>
 
-      .card {
-        position: relative;
-        z-index: 1;
-        width: 340px;
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        padding: 40px 32px;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 32px;
-        box-shadow: 0 0 80px rgba(0,229,160,0.04);
-      }
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const statusEl = document.getElementById("status");
+    const callBtn = document.getElementById("callBtn");
+    const hangupBtn = document.getElementById("hangupBtn");
+    const muteBtn = document.getElementById("muteBtn");
+    const joinBtn = document.getElementById("joinBtn");
+    const codeInput = document.getElementById("codeInput");
+    const joinSection = document.getElementById("joinSection");
+    const callSection = document.getElementById("callSection");
+    const remoteAudio = document.getElementById("remoteAudio");
 
-      .logo {
-        font-family: 'Syne', sans-serif;
-        font-weight: 800;
-        font-size: 22px;
-        letter-spacing: -0.5px;
-        color: var(--text);
-      }
+    let peer = null;
+    let localStream = null;
+    let targetId = null;
+    let muted = false;
 
-      .logo span {
-        color: var(--accent);
-      }
+    const iceConfig = {
+      iceServers: [
+        { urls: "stun:stun.relay.metered.ca:80" },
+        { urls: "turn:global.relay.metered.ca:80", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
+        { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
+        { urls: "turn:global.relay.metered.ca:443", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
+        { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
+      ],
+    };
 
-      /* Avatar / call visual */
-      .avatar-ring {
-        position: relative;
-        width: 110px;
-        height: 110px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
+    function log(msg) {
+      statusEl.textContent = msg;
+      console.log(msg);
+    }
 
-      .avatar-ring svg.ring {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        animation: spin 8s linear infinite;
-      }
+    async function getMic() {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    }
 
-      @keyframes spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
+    function createPeer() {
+      peer = new RTCPeerConnection(iceConfig);
 
-      .avatar-inner {
-        width: 76px;
-        height: 76px;
-        border-radius: 50%;
-        background: var(--border);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 30px;
-      }
-
-      /* Pulse animation when in call */
-      .avatar-ring.active .avatar-inner {
-        animation: pulse 1.8s ease-in-out infinite;
-        box-shadow: 0 0 0 0 rgba(0,229,160,0.4);
-      }
-
-      @keyframes pulse {
-        0%   { box-shadow: 0 0 0 0 rgba(0,229,160,0.4); }
-        70%  { box-shadow: 0 0 0 18px rgba(0,229,160,0); }
-        100% { box-shadow: 0 0 0 0 rgba(0,229,160,0); }
-      }
-
-      /* Status */
-      .status-wrap {
-        text-align: center;
-      }
-
-      #status {
-        font-size: 13px;
-        color: var(--muted);
-        letter-spacing: 0.5px;
-        text-transform: uppercase;
-        transition: color 0.3s;
-      }
-
-      #status.active { color: var(--accent); }
-      #status.error  { color: var(--red); }
-
-      /* Buttons */
-      .btn-row {
-        display: flex;
-        gap: 16px;
-      }
-
-      .btn {
-        width: 64px;
-        height: 64px;
-        border-radius: 50%;
-        border: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 22px;
-        transition: transform 0.15s, box-shadow 0.15s;
-      }
-
-      .btn:active { transform: scale(0.93); }
-
-      .btn-call {
-        background: var(--accent);
-        box-shadow: 0 4px 24px rgba(0,229,160,0.3);
-      }
-
-      .btn-call:hover {
-        box-shadow: 0 4px 32px rgba(0,229,160,0.5);
-      }
-
-      .btn-hangup {
-        background: var(--red);
-        box-shadow: 0 4px 24px rgba(255,77,109,0.3);
-      }
-
-      .btn-hangup:hover {
-        box-shadow: 0 4px 32px rgba(255,77,109,0.5);
-      }
-
-      .btn-mute {
-        background: var(--border);
-        border: 1px solid #2a2a2a;
-        color: var(--text);
-      }
-
-      .btn-mute.muted {
-        background: var(--accent-dim);
-        border-color: var(--accent);
-        color: var(--accent);
-      }
-
-      /* Footer */
-      footer {
-        position: fixed;
-        bottom: 16px;
-        font-size: 11px;
-        color: #333;
-        letter-spacing: 0.5px;
-        z-index: 1;
-      }
-
-      audio { display: none; }
-    </style>
-  </head>
-  <body>
-
-    <div class="card">
-      <div class="logo">Connect<span>IQ</span></div>
-
-      <div class="avatar-ring" id="avatarRing">
-        <!-- spinning dashed ring -->
-        <svg class="ring" viewBox="0 0 110 110" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="55" cy="55" r="52" stroke="#1e1e1e" stroke-width="1.5" stroke-dasharray="6 6"/>
-          <circle cx="55" cy="55" r="52" stroke="#00e5a0" stroke-width="1.5" stroke-dasharray="20 300" stroke-linecap="round" opacity="0.6"/>
-        </svg>
-        <div class="avatar-inner">📞</div>
-      </div>
-
-      <div class="status-wrap">
-        <div id="status">Connecting...</div>
-      </div>
-
-      <div class="btn-row">
-        <button class="btn btn-mute" id="muteBtn" style="display:none" title="Mute">🎙️</button>
-        <button class="btn btn-call" id="callBtn" style="display:none" title="Call">📲</button>
-        <button class="btn btn-hangup" id="hangupBtn" style="display:none" title="Hang Up">📵</button>
-      </div>
-    </div>
-
-    <footer>Made with ❤️ by Mzika</footer>
-
-    <audio id="remoteAudio" autoplay></audio>
-
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-      const socket = io();
-      const statusEl = document.getElementById("status");
-      const callBtn = document.getElementById("callBtn");
-      const hangupBtn = document.getElementById("hangupBtn");
-      const muteBtn = document.getElementById("muteBtn");
-      const remoteAudio = document.getElementById("remoteAudio");
-      const avatarRing = document.getElementById("avatarRing");
-
-      let peer = null;
-      let localStream = null;
-      let targetId = null;
-      let muted = false;
-
-      const iceConfig = {
-        iceServers: [
-          { urls: "stun:stun.relay.metered.ca:80" },
-          { urls: "turn:global.relay.metered.ca:80", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
-          { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
-          { urls: "turn:global.relay.metered.ca:443", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
-          { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "3ed120aad1825faa621ae1b5", credential: "5AkBuqfr/HbEX9cY" },
-        ],
+      peer.onicecandidate = (e) => {
+        if (e.candidate) socket.emit("ice-candidate", { target: targetId, candidate: e.candidate });
       };
 
-      function log(msg, type = "") {
-        statusEl.textContent = msg;
-        statusEl.className = type;
-        console.log(msg);
-      }
-
-      function setInCall(val) {
-        if (val) {
-          avatarRing.classList.add("active");
-          muteBtn.style.display = "flex";
-          hangupBtn.style.display = "flex";
-          callBtn.style.display = "none";
-        } else {
-          avatarRing.classList.remove("active");
+      peer.oniceconnectionstatechange = () => {
+        const state = peer.iceConnectionState;
+        if (state === "connected" || state === "completed") {
+          log("In call");
+          muteBtn.style.display = "inline";
+          hangupBtn.style.display = "inline";
+        } else if (state === "disconnected" || state === "failed") {
+          log("Call ended");
           muteBtn.style.display = "none";
           hangupBtn.style.display = "none";
         }
-      }
-
-      async function getMic() {
-        log("Requesting mic...");
-        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        log("Mic ready", "active");
-      }
-
-      function createPeer() {
-        peer = new RTCPeerConnection(iceConfig);
-
-        peer.onicecandidate = (e) => {
-          if (e.candidate) socket.emit("ice-candidate", { target: targetId, candidate: e.candidate });
-        };
-
-        peer.oniceconnectionstatechange = () => {
-          const state = peer.iceConnectionState;
-          if (state === "connected" || state === "completed") {
-            log("In call", "active");
-            setInCall(true);
-          } else if (state === "disconnected" || state === "failed") {
-            log("Call ended", "error");
-            setInCall(false);
-          }
-        };
-
-        peer.ontrack = (e) => {
-          remoteAudio.srcObject = e.streams[0];
-        };
-
-        localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
-      }
-
-      // Mute toggle
-      muteBtn.onclick = () => {
-        muted = !muted;
-        localStream.getAudioTracks().forEach(t => t.enabled = !muted);
-        muteBtn.textContent = muted ? "🔇" : "🎙️";
-        muteBtn.classList.toggle("muted", muted);
       };
 
-      socket.on("wait", () => log("Waiting for someone..."));
+      peer.ontrack = (e) => {
+        remoteAudio.srcObject = e.streams[0];
+      };
 
-      socket.on("start-call", async ({ target }) => {
-        targetId = target;
-        log("Someone is waiting");
-        callBtn.style.display = "flex";
+      localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+    }
 
-        callBtn.onclick = async () => {
-          try {
-            await getMic();
-            createPeer();
-            const offer = await peer.createOffer();
-            await peer.setLocalDescription(offer);
-            socket.emit("offer", { target: targetId, offer });
-            log("Calling...", "active");
-            callBtn.style.display = "none";
-          } catch (err) {
-            log("Error: " + err.message, "error");
-          }
-        };
-      });
+    joinBtn.onclick = () => {
+      const code = codeInput.value.trim();
+      if (!code) return alert("Enter a room code first");
+      joinSection.style.display = "none";
+      callSection.style.display = "block";
+      socket.emit("join-room", code);
+    };
 
-      socket.on("incoming-call", async ({ from }) => {
-        targetId = from;
-        log("Incoming call...", "active");
+    socket.on("wait", () => log("Waiting for your contact..."));
+
+    socket.on("start-call", async ({ target }) => {
+      targetId = target;
+      log("Contact joined — press Call");
+      callBtn.style.display = "inline";
+
+      callBtn.onclick = async () => {
+        callBtn.style.display = "none";
         try {
           await getMic();
           createPeer();
-        } catch (err) {
-          log("Error: " + err.message, "error");
-        }
-      });
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
 
-      socket.on("offer", async ({ from, offer }) => {
-        targetId = from;
-        try {
-          await peer.setRemoteDescription(offer);
-          const answer = await peer.createAnswer();
-          await peer.setLocalDescription(answer);
-          socket.emit("answer", { target: targetId, answer });
-        } catch (err) {
-          log("Error: " + err.message, "error");
-        }
-      });
+          const sdp = offer.sdp
+            .replace(/a=fmtp:111/g, "a=fmtp:111 maxaveragebitrate=12000;stereo=0;sprop-stereo=0")
+            .replace(/a=mid:audio\r\n/g, "a=mid:audio\r\nb=AS:12\r\n");
+          offer.sdp = sdp;
 
-      socket.on("answer", async ({ answer }) => {
-        try {
-          await peer.setRemoteDescription(answer);
+          socket.emit("offer", { target: targetId, offer });
+          log("Calling...");
         } catch (err) {
-          log("Error: " + err.message, "error");
+          log("Error: " + err.message);
         }
-      });
-
-      socket.on("ice-candidate", async ({ candidate }) => {
-        try {
-          if (peer) await peer.addIceCandidate(candidate);
-        } catch (err) {
-          console.error("ICE error:", err);
-        }
-      });
-
-      hangupBtn.onclick = () => {
-        peer.close();
-        peer = null;
-        localStream.getTracks().forEach(t => t.stop());
-        log("Call ended.");
-        setInCall(false);
       };
-    </script>
-  </body>
+    });
+
+    socket.on("incoming-call", async ({ from }) => {
+      targetId = from;
+      log("Incoming call...");
+      try {
+        await getMic();
+        createPeer();
+      } catch (err) {
+        log("Error: " + err.message);
+      }
+    });
+
+    socket.on("offer", async ({ from, offer }) => {
+      targetId = from;
+      try {
+        await peer.setRemoteDescription(offer);
+        const answer = await peer.createAnswer();
+        await peer.setLocalDescription(answer);
+        socket.emit("answer", { target: targetId, answer });
+      } catch (err) {
+        log("Error: " + err.message);
+      }
+    });
+
+    socket.on("answer", async ({ answer }) => {
+      try {
+        await peer.setRemoteDescription(answer);
+      } catch (err) {
+        log("Error: " + err.message);
+      }
+    });
+
+    socket.on("ice-candidate", async ({ candidate }) => {
+      try {
+        if (peer) await peer.addIceCandidate(candidate);
+      } catch (err) {
+        console.error("ICE error:", err);
+      }
+    });
+
+    muteBtn.onclick = () => {
+      muted = !muted;
+      localStream.getAudioTracks().forEach(t => t.enabled = !muted);
+      muteBtn.textContent = muted ? "Unmute" : "Mute";
+    };
+
+    hangupBtn.onclick = () => {
+      peer.close();
+      peer = null;
+      localStream.getTracks().forEach(t => t.stop());
+      log("Call ended.");
+      muteBtn.style.display = "none";
+      hangupBtn.style.display = "none";
+    };
+  </script>
+</body>
 </html>

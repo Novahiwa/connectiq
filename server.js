@@ -1,7 +1,6 @@
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const PORT = process.env.PORT || 3000;
 
 const app = express();
 const server = http.createServer(app);
@@ -9,20 +8,24 @@ const io = new Server(server);
 
 app.use(express.static("public"));
 
-let waitingUser = null;
+const rooms = {};
 
 io.on("connection", (socket) => {
   console.log("Connected:", socket.id);
 
-  if (!waitingUser) {
-    waitingUser = socket.id;
-    socket.emit("wait"); // tell this user to wait
-  } else {
-    // Second user arrived — introduce them to the first
-    socket.emit("start-call", { target: waitingUser });
-    io.to(waitingUser).emit("incoming-call", { from: socket.id });
-    waitingUser = null;
-  }
+  socket.on("join-room", (code) => {
+    if (!rooms[code]) {
+      rooms[code] = socket.id;
+      socket.join(code);
+      socket.emit("wait");
+    } else {
+      const other = rooms[code];
+      socket.join(code);
+      socket.emit("start-call", { target: other });
+      io.to(other).emit("incoming-call", { from: socket.id });
+      delete rooms[code];
+    }
+  });
 
   socket.on("offer", ({ target, offer }) => {
     io.to(target).emit("offer", { from: socket.id, offer });
@@ -37,8 +40,12 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    if (waitingUser === socket.id) waitingUser = null;
+    for (const code in rooms) {
+      if (rooms[code] === socket.id) delete rooms[code];
+    }
     console.log("Disconnected:", socket.id);
   });
 });
+
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Running on port ${PORT}`));
