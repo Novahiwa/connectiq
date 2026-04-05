@@ -22,7 +22,7 @@
   </div>
 
   <audio id="remoteAudio" autoplay></audio>
-  <audio id="ringtone" loop src="https://www.soundjay.com/phone/sounds/phone-ringing-1.mp3"></audio>
+  <audio id="ringtone"></audio>
   <p><small>Made with ❤️ by Mzika</small></p>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -36,13 +36,40 @@
     const joinSection = document.getElementById("joinSection");
     const callSection = document.getElementById("callSection");
     const remoteAudio = document.getElementById("remoteAudio");
-    const ringtone = document.getElementById("ringtone");
 
     let peer = null;
     let localStream = null;
     let targetId = null;
     let timerInterval = null;
     let seconds = 0;
+    let ringtonePlayer = null;
+
+    function playRingtone() {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+      function ring() {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 480;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.8);
+      }
+
+      ring();
+      const interval = setInterval(ring, 1500);
+      return { stop: () => { clearInterval(interval); ctx.close(); } };
+    }
+
+    function stopRingtone() {
+      if (ringtonePlayer) {
+        ringtonePlayer.stop();
+        ringtonePlayer = null;
+      }
+    }
 
     function startTimer() {
       seconds = 0;
@@ -92,14 +119,12 @@
       peer.oniceconnectionstatechange = () => {
         const state = peer.iceConnectionState;
         if (state === "connected" || state === "completed") {
-          ringtone.pause();
-          ringtone.currentTime = 0;
+          stopRingtone();
           log("In call");
           hangupBtn.style.display = "inline";
           startTimer();
         } else if (state === "disconnected" || state === "failed") {
-          ringtone.pause();
-          ringtone.currentTime = 0;
+          stopRingtone();
           log("Call ended");
           hangupBtn.style.display = "none";
           stopTimer();
@@ -116,10 +141,6 @@
     joinBtn.onclick = () => {
       const code = codeInput.value.trim();
       if (!code) return alert("Enter a room code first");
-
-      // Unlock audio on user gesture
-      ringtone.play().then(() => ringtone.pause()).catch(() => {});
-
       joinSection.style.display = "none";
       callSection.style.display = "block";
       socket.emit("join-room", code);
@@ -156,7 +177,7 @@
     socket.on("incoming-call", async ({ from }) => {
       targetId = from;
       log("Incoming call...");
-      ringtone.play().catch(() => {});
+      ringtonePlayer = playRingtone();
       try {
         await getMic();
         createPeer();
@@ -197,8 +218,7 @@
       peer.close();
       peer = null;
       localStream.getTracks().forEach(t => t.stop());
-      ringtone.pause();
-      ringtone.currentTime = 0;
+      stopRingtone();
       log("Call ended.");
       hangupBtn.style.display = "none";
       stopTimer();
