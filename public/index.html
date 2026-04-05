@@ -22,6 +22,7 @@
   </div>
 
   <audio id="remoteAudio" autoplay></audio>
+  <audio id="ringtone" loop src="https://www.soundjay.com/phone/sounds/phone-ringing-1.mp3"></audio>
   <p><small>Made with ❤️ by Mzika</small></p>
 
   <script src="/socket.io/socket.io.js"></script>
@@ -35,6 +36,7 @@
     const joinSection = document.getElementById("joinSection");
     const callSection = document.getElementById("callSection");
     const remoteAudio = document.getElementById("remoteAudio");
+    const ringtone = document.getElementById("ringtone");
 
     let peer = null;
     let localStream = null;
@@ -90,10 +92,14 @@
       peer.oniceconnectionstatechange = () => {
         const state = peer.iceConnectionState;
         if (state === "connected" || state === "completed") {
+          ringtone.pause();
+          ringtone.currentTime = 0;
           log("In call");
           hangupBtn.style.display = "inline";
           startTimer();
         } else if (state === "disconnected" || state === "failed") {
+          ringtone.pause();
+          ringtone.currentTime = 0;
           log("Call ended");
           hangupBtn.style.display = "none";
           stopTimer();
@@ -119,7 +125,7 @@
 
     socket.on("start-call", async ({ target }) => {
       targetId = target;
-      log("Contact joined -> press Call");
+      log("Contact joined — press Call");
       callBtn.style.display = "inline";
 
       callBtn.onclick = async () => {
@@ -146,6 +152,7 @@
     socket.on("incoming-call", async ({ from }) => {
       targetId = from;
       log("Incoming call...");
+      ringtone.play();
       try {
         await getMic();
         createPeer();
@@ -186,6 +193,8 @@
       peer.close();
       peer = null;
       localStream.getTracks().forEach(t => t.stop());
+      ringtone.pause();
+      ringtone.currentTime = 0;
       log("Call ended.");
       hangupBtn.style.display = "none";
       stopTimer();
